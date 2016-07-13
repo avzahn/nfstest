@@ -1,13 +1,10 @@
 from time import time,sleep
-from multiprocessing import Process
+from multiprocessing import Process,
 import numpy as np
 from os import remove
 from os.path import join
 import sys
 import h5py
-
-import sys
-
 
 def gen_array(MB):
 	N = int(MB*1e6/8.)
@@ -74,6 +71,20 @@ class fs_test(object):
 		else:
 			self.rate_limited_test()
 
+	def remote_start(self):
+
+		self.start()
+		self.save()
+
+	def save(self):
+
+		fname = "%s_%s_%s.npy"%(self.rate,self.chunksize,self.idn)
+
+		np.save("%s_%s_%s",np.array( (self.start_times,self.finish_times) ) )
+
+
+
+
 	def rate_unlimited_test(self):
 
 		t0 = time()
@@ -124,9 +135,6 @@ class fs_multi_test(object):
 
 	def __init__(self,rates,chunks,duration,fname,fs):
 
-
-		self.fname = fname
-
 		self.testers=[]
 		for i,r,c in zip(range(len(rates)),rates,chunks):
 			self.testers.append(fs_test(rate=r,
@@ -137,23 +145,6 @@ class fs_multi_test(object):
 
 	def run(self):
 
-		self.processes = [Process(target=test.start) for test in self.testers]
+		self.processes = [Process(target=test.remote_start) for test in self.testers]
 		[p.start() for p in self.processes]
 		[p.join() for p in self.processes]
-		self.save()
-
-	def save(self):
-		
-		with h5py.File(self.fname,'a') as f:
-
-			for test in self.testers:
-
-				grpname = "%s_%s_%s"%(test.rate,test.chunksize,test.idn)
-				grp = f.create_group(grpname)
-
-				# not memory efficient, probably don't care
-				grp.create_dataset('start',data=np.array(test.start_times))
-				grp.create_dataset('finish',data=np.array(test.finish_times))
-				grp.attrs['rate'] = test.rate
-				grp.attrs['write_length'] = test.chunksize
-				grp.attrs['units'] = 'MB, seconds'
