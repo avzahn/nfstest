@@ -1,5 +1,5 @@
 from time import time,sleep
-from multiprocessing import Process,
+from multiprocessing import Process
 import numpy as np
 from os import remove
 from os.path import join
@@ -80,7 +80,7 @@ class fs_test(object):
 
 		fname = "%s_%s_%s.npy"%(self.rate,self.chunksize,self.idn)
 
-		np.save("%s_%s_%s",np.array( (self.start_times,self.finish_times) ) )
+		np.save(fname,np.array( (self.start_times,self.finish_times) ) )
 
 
 
@@ -133,7 +133,7 @@ class fs_multi_test(object):
 	Manage multiple fs_test objects at once
 	"""
 
-	def __init__(self,rates,chunks,duration,fname,fs):
+	def __init__(self,rates,chunks,duration,fs):
 
 		self.testers=[]
 		for i,r,c in zip(range(len(rates)),rates,chunks):
