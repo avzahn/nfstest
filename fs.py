@@ -1,14 +1,17 @@
 from time import time,sleep
-from multiprocessing import process
+from multiprocessing import Process
 import numpy as np
 from os import remove
 from os.path import join
 import sys
 import h5py
 
+import sys
+
+
 def gen_array(MB):
 	N = int(MB*1e6/8.)
-	return np.uniform.random(0,1,N)
+	return np.random.uniform(0,1,N)
 
 def spin(Dt):
 	"""
@@ -50,12 +53,19 @@ class fs_test(object):
 		self.payload = gen_array(chunksize)
 
 		self.target = "%s_%s_%s.npy"%(rate,chunksize,idn)
-		self.target = os.path.join(fs,self.target)
+		self.target = join(fs,self.target)
 
 		self.start_times = []
 		self.finish_times = []
 
 		self.period = chunksize/float(rate)
+
+		msg = 'initialized fs_test %i: %i MB writes at %i MB/s to %s'%(idn,chunksize,rate,self.target)
+
+
+		print msg
+		sys.stdout.flush()
+
 
 	def start(self):
 
@@ -78,6 +88,8 @@ class fs_test(object):
 			except:
 				finish = np.nan
 
+			elapsed = time() - t0
+
 			self.start_times.append(start)
 			self.finish_times.append(finish)
 
@@ -98,7 +110,9 @@ class fs_test(object):
 
 			dt = finish-start
 			if dt < self.period:
-				spin(period-dt)
+				spin(self.period-dt)
+
+			elapsed = time() - t0
 
 			self.start_times.append(start)
 			self.finish_times.append(finish)
@@ -110,12 +124,14 @@ class fs_multi_test(object):
 
 	def __init__(self,rates,chunks,duration,fname,fs):
 
+
+		self.fname = fname
+
 		self.testers=[]
 		for i,r,c in zip(range(len(rates)),rates,chunks):
 			self.testers.append(fs_test(rate=r,
 				chunksize=c,
 				idn=i,
-				fname=fname,
 				duration=duration,
 				fs=fs))
 
@@ -128,7 +144,7 @@ class fs_multi_test(object):
 
 	def save(self):
 		
-		with h5py.Open(fname,'a') as f:
+		with h5py.File(self.fname,'a') as f:
 
 			for test in self.testers:
 
