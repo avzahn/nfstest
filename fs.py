@@ -36,10 +36,10 @@ class fs_test(object):
 	modifications, so we're just going to have to deal with
 	only having upper bounds here.
 
-	This also isn't the lowest overhead iplementation, but
+	This also isn't the lowest overhead implementation, but
 	we're only interested in testing at a few tens of MB/s.
 	"""
-	def __init__(self,chunksize,duration,fs,idn=0,rate=None):
+	def __init__(self,chunksize,duration,fs,idn=0,rate=None,result_dir=''):
 
 		self.rate = rate # MB/s
 		self.chunksize = chunksize # MB
@@ -51,6 +51,8 @@ class fs_test(object):
 
 		self.target = "%s_%s_%s.npy"%(rate,chunksize,idn)
 		self.target = join(fs,self.target)
+
+		self.result_dir = result_dir
 
 		self.start_times = []
 		self.finish_times = []
@@ -79,7 +81,7 @@ class fs_test(object):
 	def save(self):
 
 		fname = "%s_%s_%s.npy"%(self.rate,self.chunksize,self.idn)
-
+		fname = join(self.result_dir,fname)
 		np.save(fname,np.array( (self.start_times,self.finish_times) ) )
 
 
