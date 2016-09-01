@@ -5,14 +5,15 @@ from os import remove
 from os.path import join
 import sys
 import h5py
+import psutil
 
 def gen_array(MB):
 	N = int(MB*1e6/8.)
 	return np.random.uniform(0,1,N)
 
-def spin(Dt):
+def sleep_wait(Dt):
 	"""
-	spin for Dt seconds, accurate to about ~10 ms
+	wait for Dt seconds, accurate to about ~10 ms
 	"""
 	t0 = time()
 	wait = Dt/1000.
@@ -28,7 +29,7 @@ class fs_test(object):
 	Test filesystem writes by writing a file of a given length
 	repeatedly.
 
-	Timing is done by naively checking the wall time before anc
+	Timing is done by naively checking the wall time before and
 	after a write. This will tend to overestimate the write time,
 	since we have no idea when the kernel will get around
 	to us. On a non realtime system, I don't know if there's a 
@@ -123,7 +124,7 @@ class fs_test(object):
 
 			dt = finish-start
 			if dt < self.period:
-				spin(self.period-dt)
+				sleep_wait(self.period-dt)
 
 			elapsed = time() - t0
 
@@ -135,18 +136,43 @@ class fs_multi_test(object):
 	Manage multiple fs_test objects at once
 	"""
 
-	def __init__(self,rates,chunks,duration,fs):
+	def __init__(self,rates,chunks,duration,fs,result_dir=''):
+
+		self.result_dir = result_dir
+
+		if isinstance(fs,str):
+			fs = (fs for i in range(len(rates)))
 
 		self.testers=[]
-		for i,r,c in zip(range(len(rates)),rates,chunks):
+		for i,r,c,f in zip(range(len(rates)),rates,chunks,fs):
 			self.testers.append(fs_test(rate=r,
 				chunksize=c,
 				idn=i,
 				duration=duration,
-				fs=fs))
+				fs=f,
+				result_dir=result_dir))
 
 	def run(self):
 
 		self.processes = [Process(target=test.remote_start) for test in self.testers]
 		[p.start() for p in self.processes]
+
+
+		t0 = time()
+		elapsed = 0.0
+
+		ram,swap,t = [],[],[]
+
+		while elapsed < self.duration:
+
+			ram.append(psutil.virtual_memory().used / 1e9)
+			swap.append(psutil.swap_memory.used / 1e9)
+			t.append(time())
+			sleep_wait(1)
+			elapsed = t[-1] - t0
+
+
 		[p.join() for p in self.processes]
+
+		mem_usage = np.array([ram,swap,t])
+		np.save(join(self.result_dir,'memory_usage.npy'),mem_usage)
