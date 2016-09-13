@@ -1,11 +1,8 @@
 from multiprocessing import Process, Pipe
 from threading import Thread
 from time import time, sleep
-import numpy as np
-
-def gen_array(MB):
-	N = int(MB*1e6/8.)
-	return np.random.uniform(0,1,N)
+import random
+import sys
 
 def wait(Dt):
 	"""
@@ -19,7 +16,11 @@ def wait(Dt):
 		elapsed = time() - t0
 	return elapsed
 
-def 
+def strcopy(s):
+	"""
+	Bypass python string interning
+	"""
+	return '%s'%s
 
 class bolostream(object):
 
@@ -28,12 +29,18 @@ class bolostream(object):
 		self.write_period = write_period
 		self.targetfs = targetfs
 
+		self.fname = 
+
 		self.conn = conn
 
 		self.io = Thread(target=self.io_run)
-		self.buff = []
+		self.buff = ''
 
-		self.payload = np.random.uniform(0,1,payload_size)
+		self.payload = ''
+
+		for i in range(payload_size):
+			c = str(random.randint(0,127))
+			self.payload += c
 
 		self.duration = duration
 
@@ -45,7 +52,7 @@ class bolostream(object):
 
 		while elapsed < self.duation:
 
-			self.buff.append(np.copy(self.payload))
+			self.buff += self.payload
 			wait(self.write_period)
 
 			elapsed = time() - t0 
@@ -54,7 +61,7 @@ class bolostream(object):
 
 	def io_run(self):
 
-		for arr in self.buff:
+		pri
 
 			
 
