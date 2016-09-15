@@ -1,5 +1,5 @@
 from multiprocessing import Process, Pipe
-from threading import Thread
+from threading import Thread, Lock
 from time import time, sleep
 from os import remove
 from os.path import join
@@ -7,6 +7,7 @@ import random
 import numpy as np
 import h5py
 import psutil
+import os
 
 def wait(Dt):
 	"""
@@ -77,9 +78,6 @@ class stream(object):
 		We want a stream_manager to be able to call self.run
 		inside a new Process, with which it can't share memory.
 		"""
-
-		self.results = results
-
 		if self.conn:
 			# if self.run was called by a stream_manager, it would
 			# have assigned self.conn, and will expect to recv
@@ -87,10 +85,16 @@ class stream(object):
 			# of self's self.results. see stream_manager.run
 			self.conn.send(results)
 
+		self.results = results
+
 class stream_manager(object):
 	"""
 	Manage multiple streams running in parallel. Just self.add() existing
 	stream objects and then self.run() followed by self.save(fname)
+
+	Also logs system memory usage while running. Manually setting
+	self.duration and then calling self.run without adding any streams
+	will give you just a memory usage logger.
 	"""
 
 	def __init__(self):
@@ -103,15 +107,23 @@ class stream_manager(object):
 	def add(self, streamer, name):
 
 		self.streamers[name] = streamer
-		self.parent_conn, streamer.conn = Pipe()
+		streamer.parent_conn, streamer.conn = Pipe()
 		streamer.process = Process(target=streamer.run,args=())
 
 		if streamer.duration > self.duration:
 			self.duration = streamer.duration
 
-	def run(self):
+	def run(self,fname):
+		try:
+			self._run()
+		finally:
+			self._stop()
+			self.save(fname)
 
-		for s in self.streamers.items():
+
+	def _run(self):
+
+		for k,s in self.streamers.iteritems():
 			s.process.start()
 
 		t0 = time()
@@ -127,18 +139,20 @@ class stream_manager(object):
 			wait(1)
 			elapsed = t[-1] - t0
 
-		for s in self.streamers.items():
+	def _stop(self):
+
+		for k,s in self.streamers.iteritems():
 			# see stream.report(). s is a local copy of
 			# s that hasn't seen any of the changes since 
 			# s.run()
 			s.results = s.parent_conn.recv()
 
-		for s in self.streamers.items():
+		for k,s in self.streamers.iteritems():
 			s.process.join()
 
 	def save(self,fname):
 
-		with h5py.File(self.fname,'a') as f:
+		with h5py.File(fname,'a') as f:
 
 			dset = f.create_dataset('ram_usage', data = self.ram)
 			dset.attrs['units'] = 'GB'
@@ -153,7 +167,7 @@ class stream_manager(object):
 				dset = f.create_dataset(name, data=r)
 				dset.attrs['columns'] = 't_start, t_end, bytes_written'
 
-class bolostream(object):
+class bolostream(stream):
 	"""
 	Simulates an SPT3g bolometer data stream. New data is added to a buffer
 	every write_period, and an io worker thread tries to write() the entire
@@ -168,7 +182,13 @@ class bolostream(object):
 		stream.__init__(self, targetfs, payload_size, write_period, duration)
 
 		self.io = Thread(target=self.io_run)
-		self.buff = ''
+
+		# ping pong between a data buffer and an io buffer to avoid
+		# having the parent thread write to a buffer we're trying
+		# to send to disk.
+		self.buff = ['','']
+		self.idx = 0
+		self.io_lock = Lock()
 
 	def run(self):
 
@@ -176,20 +196,32 @@ class bolostream(object):
 		t0 = time()
 		elapsed = 0
 
-		with open(self.fname,'a') as self.file:
+		try:
 
-			while elapsed < self.duration:
+			with open(self.fname,'a') as self.file:
 
-				self.buff += self.payload
-				wait(self.write_period)
+				while elapsed < self.duration:
 
-				elapsed = time() - t0 
+					with self.io_lock:
 
+						self.buff[self.idx] += self.payload
+						wait(self.write_period)
+
+						elapsed = time() - t0
+
+					
+						#print '****** bolostream.run ******'
+						#print self.buff
+						#print '****** bolostream.run ******'
+
+
+		finally:
 			self.io.join()
+			self.report(np.array(self.results))
+			os.remove(self.fname)
 			del self.buff
+			self.buff = ['','']
 
-
-		self.report(np.array(self.results))
 
 	def io_run(self):
 		"""
@@ -206,14 +238,29 @@ class bolostream(object):
 
 		while elapsed < self.duration:
 
-			# the GIL properly locks self.buff for us
-			if len(self.buff) > 0:
+			out = self.buff[self.idx]
+
+			if len(out) > 0:
+
+				with self.io_lock:
+
+					print '------ bolostream.io_run ------'
+					print self.buff
+					print self.idx
+					print '------ bolostream.io_run ------\n'
+
+					# make sure self.run is using a different buffer
+					# while this write is happening
+					self.idx = int(not self.idx)
 
 				t_start = time()
-				self.file.write(self.buff)
+				self.file.write(out)
 				t_end = time()
-				bytes_written = len(self.buff)
-				self.buff = ''
+				bytes_written = len(out)
+				out = ''
+
+				print self.buff
+				print ''
 
 				self.results.append( (t_start,t_end,bytes_written) )
 
@@ -221,7 +268,7 @@ class bolostream(object):
 
 			elapsed = time() - t0 	
 
-class gcpstream(object):
+class gcpstream(stream):
 
 	def __init__(self, targetfs, payload_size, write_period, duration):
 
@@ -236,27 +283,28 @@ class gcpstream(object):
 		t_end = None
 		bytes_written = self.payload_size
 
-		with open(self.fname,'a') as self.file:
+		try:
 
-			while elapsed < self.duration:
+			with open(self.fname,'a') as self.file:
 
-				t_start = time()
-				self.file.write(self.payload)
-				t_end = time()
+				while elapsed < self.duration:
 
-				self.results.append( (t_start,t_end,bytes_written) )
+					t_start = time()
+					self.file.write(self.payload)
+					t_end = time()
 
-				dt = t_end - t_start
+					self.results.append( (t_start,t_end,bytes_written) )
 
-				if dt < self.write_period:
+					dt = t_end - t_start
 
-					wait(self.write_period - dt)
+					if dt < self.write_period:
 
-				elapsed = time() - t0
+						wait(self.write_period - dt)
 
-		self.report(np.array(self.results))
+					elapsed = time() - t0
 
+		finally:
 
-
-
+			self.report(np.array(self.results))
+			os.remove(self.fname)
 
