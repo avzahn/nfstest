@@ -1,3 +1,4 @@
+# NOT multiprocessing; get this from pypi
 from multiprocess import Process, Pipe
 from threading import Thread
 from time import time, sleep
@@ -153,9 +154,6 @@ class stream_manager(object):
 			wait(1)
 			elapsed = self.t[-1] - t0
 
-			#print time()
-			#sys,stdout.flush()
-
 		print '_run end'
 		sys.stdout.flush()
 
@@ -236,12 +234,10 @@ class bolostream(stream):
 
 				while elapsed < self.duration:
 
-					with self.io_lock:
+					self.buff[self.idx] += self.payload
+					wait(self.write_period)
 
-						self.buff[self.idx] += self.payload
-						wait(self.write_period)
-
-						elapsed = time() - t0
+					elapsed = time() - t0
 
 		finally:
 
@@ -271,11 +267,6 @@ class bolostream(stream):
 
 			if len(self.buff[idx]) > 0:
 
-				print '------ bolostream.io_run ------'
-				print self.buff
-				print self.idx
-				print '------ bolostream.io_run ------\n'
-
 				# make sure self.run is using a different buffer
 				# while this write is happening
 				self.idx = int(not idx)
@@ -285,9 +276,6 @@ class bolostream(stream):
 				t_end = time()
 				bytes_written = len(self.buff[idx])
 				self.buff[idx] = ''
-
-				print self.buff
-				print ''
 
 				self.results.append( (t_start,t_end,bytes_written) )
 
