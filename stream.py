@@ -1,5 +1,5 @@
-from multiprocessing import Process, Pipe
-from threading import Thread, Lock
+from multiprocess import Process, Pipe
+from threading import Thread
 from time import time, sleep
 from os import remove
 from os.path import join
@@ -8,6 +8,7 @@ import numpy as np
 import h5py
 import psutil
 import os
+import sys
 
 def wait(Dt):
 	"""
@@ -56,6 +57,7 @@ class stream(object):
 		"""
 		
 		self.write_period = write_period
+		self.payload_size = payload_size
 		self.targetfs = targetfs
 
 		self.fname = '%s_%s_%i'%(payload_size,write_period, id(self))
@@ -102,13 +104,13 @@ class stream_manager(object):
 		self.streamers = {}
 		self.ram,self.swap,self.t = [],[],[]
 
-		self.duration = 0
+		self.duration = 0.0
 
 	def add(self, streamer, name):
 
 		self.streamers[name] = streamer
 		streamer.parent_conn, streamer.conn = Pipe()
-		streamer.process = Process(target=streamer.run,args=())
+		streamer.process = Process(target=streamer.run)
 
 		if streamer.duration > self.duration:
 			self.duration = streamer.duration
@@ -126,31 +128,64 @@ class stream_manager(object):
 		for k,s in self.streamers.iteritems():
 			s.process.start()
 
+
+		print '_run: started all workers'
+		sys.stdout.flush()
+
 		t0 = time()
 		elapsed = 0.0
 
 		self.ram,self.swap,self.t = [],[],[]
 
+
+		print 'duration = %f' % self.duration
+		sys.stdout.flush()
+
+
 		while elapsed < self.duration:
 
-			ram.append(psutil.virtual_memory().used / 1e9)
-			swap.append(psutil.swap_memory().used / 1e9)
-			t.append(time())
+			print '_run: logging psutil elapsed = %f' % elapsed
+			sys.stdout.flush()
+
+			self.ram.append(psutil.virtual_memory().used / 1e9)
+			self.swap.append(psutil.swap_memory().used / 1e9)
+			self.t.append(time())
 			wait(1)
-			elapsed = t[-1] - t0
+			elapsed = self.t[-1] - t0
+
+			#print time()
+			#sys,stdout.flush()
+
+		print '_run end'
+		sys.stdout.flush()
+
 
 	def _stop(self):
+
+		print '(165) _stop()'
+		sys.stdout.flush()
 
 		for k,s in self.streamers.iteritems():
 			# see stream.report(). s is a local copy of
 			# s that hasn't seen any of the changes since 
 			# s.run()
+			print k,s
+			sys.stdout.flush()
+
 			s.results = s.parent_conn.recv()
+
+		print '_stop: downloaded results'
+		sys.stdout.flush()
 
 		for k,s in self.streamers.iteritems():
 			s.process.join()
 
+		print '_stop: stopped all workers'
+		sys.stdout.flush()
+
 	def save(self,fname):
+
+		print 'save()'
 
 		with h5py.File(fname,'a') as f:
 
@@ -188,7 +223,6 @@ class bolostream(stream):
 		# to send to disk.
 		self.buff = ['','']
 		self.idx = 0
-		self.io_lock = Lock()
 
 	def run(self):
 
@@ -209,13 +243,8 @@ class bolostream(stream):
 
 						elapsed = time() - t0
 
-					
-						#print '****** bolostream.run ******'
-						#print self.buff
-						#print '****** bolostream.run ******'
-
-
 		finally:
+
 			self.io.join()
 			self.report(np.array(self.results))
 			os.remove(self.fname)
@@ -238,26 +267,24 @@ class bolostream(stream):
 
 		while elapsed < self.duration:
 
-			out = self.buff[self.idx]
+			idx = self.idx
 
-			if len(out) > 0:
+			if len(self.buff[idx]) > 0:
 
-				with self.io_lock:
+				print '------ bolostream.io_run ------'
+				print self.buff
+				print self.idx
+				print '------ bolostream.io_run ------\n'
 
-					print '------ bolostream.io_run ------'
-					print self.buff
-					print self.idx
-					print '------ bolostream.io_run ------\n'
-
-					# make sure self.run is using a different buffer
-					# while this write is happening
-					self.idx = int(not self.idx)
+				# make sure self.run is using a different buffer
+				# while this write is happening
+				self.idx = int(not idx)
 
 				t_start = time()
-				self.file.write(out)
+				self.file.write(self.buff[idx])
 				t_end = time()
-				bytes_written = len(out)
-				out = ''
+				bytes_written = len(self.buff[idx])
+				self.buff[idx] = ''
 
 				print self.buff
 				print ''
